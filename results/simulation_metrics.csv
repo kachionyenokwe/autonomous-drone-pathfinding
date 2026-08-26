@@ -1,0 +1,8 @@
+Metric,Value
+total_steps,40
+reroute_count,1
+hazard_pauses,1
+optimal_distance_steps,38
+actual_trajectory_steps,40
+path_efficiency_percent,95.0
+execution_time_seconds,13.5254

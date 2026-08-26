@@ -1,3 +1,5 @@
+import csv
+from pathlib import Path
 import heapq
 import time
 
@@ -14,11 +16,10 @@ GOAL = (19, 19)
 STATIC_OBSTACLE_DENSITY = 0.20
 RANDOM_SEED = 42
 
-np.random.seed(RANDOM_SEED)
 
-
-def create_grid():
-    """Create a reproducible grid containing randomly placed obstacles."""
+def create_grid(random_seed=RANDOM_SEED):
+    """Create a reproducible grid containing random obstacles."""
+    random_generator = np.random.RandomState(random_seed)
     new_grid = np.zeros((GRID_SIZE, GRID_SIZE), dtype=int)
 
     for row in range(GRID_SIZE):
@@ -26,7 +27,7 @@ def create_grid():
             position = (row, column)
 
             if position not in (START, GOAL):
-                if np.random.rand() < STATIC_OBSTACLE_DENSITY:
+                if random_generator.rand() < STATIC_OBSTACLE_DENSITY:
                     new_grid[row, column] = 1
 
     return new_grid
@@ -116,8 +117,14 @@ class DynamicObstacle:
 class DroneSimulation:
     """Control the drone, obstacles, rerouting, and performance metrics."""
 
-    def __init__(self):
-        self.grid = create_grid()
+    def __init__(
+        self,
+        random_seed=RANDOM_SEED,
+        save_outputs=True,
+    ):
+        self.grid = create_grid(random_seed)
+        self.random_seed = random_seed
+        self.save_outputs = save_outputs
         self.drone_position = START
         self.goal = GOAL
         self.path = astar(self.grid, self.drone_position, self.goal)
@@ -224,6 +231,9 @@ class DroneSimulation:
         self.total_time = time.perf_counter() - self.start_time
         self.print_metrics()
 
+        if self.save_outputs:
+            self.save_results()
+
     def print_metrics(self):
         optimal_distance = heuristic(START, GOAL)
         actual_distance = len(self.trajectory) - 1
@@ -243,111 +253,267 @@ class DroneSimulation:
         print(f"Execution time          : {self.total_time:.4f} seconds")
         print("=" * 50)
 
+    def save_results(self):
+        """Save numerical metrics, a summary chart, and trajectory heatmap."""
+        results_directory = Path("results")
+        graphs_directory = Path("evidence") / "graphs"
 
-simulation = DroneSimulation()
+        results_directory.mkdir(parents=True, exist_ok=True)
+        graphs_directory.mkdir(parents=True, exist_ok=True)
 
-figure, axis = plt.subplots(figsize=(9, 8))
-color_map = ListedColormap(["#FFFFFF", "#333333", "#FF0000"])
+        optimal_distance = heuristic(START, GOAL)
+        actual_distance = len(self.trajectory) - 1
+        efficiency = (
+            optimal_distance / max(1, actual_distance)
+        ) * 100
 
+        metrics = {
+            "total_steps": self.step_count,
+            "reroute_count": self.reroute_count,
+            "hazard_pauses": self.pause_count,
+            "optimal_distance_steps": optimal_distance,
+            "actual_trajectory_steps": actual_distance,
+            "path_efficiency_percent": round(efficiency, 2),
+            "execution_time_seconds": round(self.total_time, 4),
+        }
 
-def animate(_frame):
-    if not simulation.completed:
-        simulation.update_frame()
+        # Save metrics as CSV.
+        csv_path = results_directory / "simulation_metrics.csv"
 
-    axis.clear()
+        with csv_path.open("w", newline="", encoding="utf-8") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(["Metric", "Value"])
 
-    display_grid = simulation.grid.copy()
+            for metric_name, metric_value in metrics.items():
+                writer.writerow([metric_name, metric_value])
 
-    for obstacle in simulation.dynamic_obstacles:
-        row, column = obstacle.position
-
-        if (row, column) not in (
-            simulation.drone_position,
-            GOAL,
-        ):
-            display_grid[row, column] = 2
-
-    axis.imshow(
-        display_grid,
-        cmap=color_map,
-        origin="upper",
-        vmin=0,
-        vmax=2,
-    )
-
-    if simulation.path:
-        path_rows, path_columns = zip(*simulation.path)
-        axis.plot(
-            path_columns,
-            path_rows,
-            color="#0066FF",
-            linestyle="--",
-            linewidth=2,
-            label="Planned route",
+        # Create performance summary chart.
+        summary_figure, summary_axes = plt.subplots(
+            1,
+            3,
+            figsize=(13, 4),
         )
 
-    trajectory_rows, trajectory_columns = zip(
-        *simulation.trajectory
-    )
-    axis.plot(
-        trajectory_columns,
-        trajectory_rows,
-        color="#00AA44",
-        linewidth=2.5,
-        label="Flight path",
+        count_labels = ["Steps", "Reroutes", "Pauses"]
+        count_values = [
+            self.step_count,
+            self.reroute_count,
+            self.pause_count,
+        ]
+
+        summary_axes[0].bar(
+            count_labels,
+            count_values,
+            color=["#0066CC", "#FF8800", "#CC3333"],
+        )
+        summary_axes[0].set_title("Simulation Events")
+        summary_axes[0].set_ylabel("Count")
+
+        distance_labels = ["Optimal", "Actual"]
+        distance_values = [optimal_distance, actual_distance]
+
+        summary_axes[1].bar(
+            distance_labels,
+            distance_values,
+            color=["#00AA44", "#0066CC"],
+        )
+        summary_axes[1].set_title("Path Distance")
+        summary_axes[1].set_ylabel("Grid steps")
+
+        summary_axes[2].bar(
+            ["Efficiency"],
+            [efficiency],
+            color="#8844CC",
+        )
+        summary_axes[2].set_title("Path Efficiency")
+        summary_axes[2].set_ylabel("Percentage")
+        summary_axes[2].set_ylim(0, 110)
+        summary_axes[2].text(
+            0,
+            efficiency + 2,
+            f"{efficiency:.2f}%",
+            ha="center",
+        )
+
+        summary_figure.suptitle(
+            "Autonomous Drone Performance Summary",
+            fontsize=14,
+        )
+        summary_figure.tight_layout()
+        summary_figure.savefig(
+            graphs_directory / "performance_summary.png",
+            dpi=300,
+            bbox_inches="tight",
+        )
+        plt.close(summary_figure)
+
+        # Create trajectory visitation heatmap.
+        trajectory_counts = np.zeros(
+            (GRID_SIZE, GRID_SIZE),
+            dtype=int,
+        )
+
+        for row, column in self.trajectory:
+            trajectory_counts[row, column] += 1
+
+        heatmap_figure, heatmap_axis = plt.subplots(
+            figsize=(8, 7)
+        )
+
+        heatmap_image = heatmap_axis.imshow(
+            trajectory_counts,
+            cmap="YlGnBu",
+            origin="upper",
+        )
+
+        heatmap_axis.scatter(
+            START[1],
+            START[0],
+            color="blue",
+            marker="s",
+            s=100,
+            label="Start",
+        )
+        heatmap_axis.scatter(
+            GOAL[1],
+            GOAL[0],
+            color="red",
+            marker="*",
+            s=160,
+            label="Goal",
+        )
+
+        heatmap_axis.set_title(
+            "Drone Trajectory Visitation Heatmap"
+        )
+        heatmap_axis.set_xlabel("Grid column")
+        heatmap_axis.set_ylabel("Grid row")
+        heatmap_axis.set_xticks(range(GRID_SIZE))
+        heatmap_axis.set_yticks(range(GRID_SIZE))
+        heatmap_axis.legend()
+
+        heatmap_figure.colorbar(
+            heatmap_image,
+            ax=heatmap_axis,
+            label="Number of visits",
+        )
+        heatmap_figure.tight_layout()
+        heatmap_figure.savefig(
+            graphs_directory / "trajectory_heatmap.png",
+            dpi=300,
+            bbox_inches="tight",
+        )
+        plt.close(heatmap_figure)
+
+        print(f"Metrics saved to: {csv_path}")
+        print(f"Graphs saved to: {graphs_directory}")
+
+
+if __name__ == "__main__":
+    simulation = DroneSimulation()
+
+    figure, axis = plt.subplots(figsize=(9, 8))
+    color_map = ListedColormap(["#FFFFFF", "#333333", "#FF0000"])
+
+
+    def animate(_frame):
+        if not simulation.completed:
+            simulation.update_frame()
+
+        axis.clear()
+
+        display_grid = simulation.grid.copy()
+
+        for obstacle in simulation.dynamic_obstacles:
+            row, column = obstacle.position
+
+            if (row, column) not in (
+                simulation.drone_position,
+                GOAL,
+            ):
+                display_grid[row, column] = 2
+
+        axis.imshow(
+            display_grid,
+            cmap=color_map,
+            origin="upper",
+            vmin=0,
+            vmax=2,
+        )
+
+        if simulation.path:
+            path_rows, path_columns = zip(*simulation.path)
+            axis.plot(
+                path_columns,
+                path_rows,
+                color="#0066FF",
+                linestyle="--",
+                linewidth=2,
+                label="Planned route",
+            )
+
+        trajectory_rows, trajectory_columns = zip(
+            *simulation.trajectory
+        )
+        axis.plot(
+            trajectory_columns,
+            trajectory_rows,
+            color="#00AA44",
+            linewidth=2.5,
+            label="Flight path",
+        )
+
+        axis.scatter(
+            START[1],
+            START[0],
+            color="blue",
+            s=120,
+            marker="s",
+            label="Start",
+        )
+        axis.scatter(
+            GOAL[1],
+            GOAL[0],
+            color="gold",
+            edgecolors="black",
+            s=180,
+            marker="*",
+            label="Goal",
+        )
+        axis.scatter(
+            simulation.drone_position[1],
+            simulation.drone_position[0],
+            color="cyan",
+            edgecolors="black",
+            s=150,
+            marker="o",
+            label="Drone",
+        )
+
+        axis.set_title(
+            f"Step: {simulation.step_count} | "
+            f"Reroutes: {simulation.reroute_count} | "
+            f"Position: {simulation.drone_position}"
+        )
+        axis.set_xticks(range(GRID_SIZE))
+        axis.set_yticks(range(GRID_SIZE))
+        axis.grid(
+            True,
+            color="#CCCCCC",
+            linestyle=":",
+            linewidth=0.5,
+        )
+        axis.legend(loc="upper left", bbox_to_anchor=(1, 1))
+        figure.tight_layout()
+
+
+    drone_animation = animation.FuncAnimation(
+        figure,
+        animate,
+        frames=100,
+        interval=300,
+        repeat=False,
+        cache_frame_data=False,
     )
 
-    axis.scatter(
-        START[1],
-        START[0],
-        color="blue",
-        s=120,
-        marker="s",
-        label="Start",
-    )
-    axis.scatter(
-        GOAL[1],
-        GOAL[0],
-        color="gold",
-        edgecolors="black",
-        s=180,
-        marker="*",
-        label="Goal",
-    )
-    axis.scatter(
-        simulation.drone_position[1],
-        simulation.drone_position[0],
-        color="cyan",
-        edgecolors="black",
-        s=150,
-        marker="o",
-        label="Drone",
-    )
-
-    axis.set_title(
-        f"Step: {simulation.step_count} | "
-        f"Reroutes: {simulation.reroute_count} | "
-        f"Position: {simulation.drone_position}"
-    )
-    axis.set_xticks(range(GRID_SIZE))
-    axis.set_yticks(range(GRID_SIZE))
-    axis.grid(
-        True,
-        color="#CCCCCC",
-        linestyle=":",
-        linewidth=0.5,
-    )
-    axis.legend(loc="upper left", bbox_to_anchor=(1, 1))
-    figure.tight_layout()
-
-
-drone_animation = animation.FuncAnimation(
-    figure,
-    animate,
-    frames=100,
-    interval=300,
-    repeat=False,
-    cache_frame_data=False,
-)
-
-plt.show()
+    plt.show()
