@@ -39,6 +39,7 @@ A controlled obstacle event occurs at step 8 to provide a reproducible demonstra
 ```text
 autonomous-drone-pathfinding/
 ├── drone_simulation.py
+├── benchmark.py
 ├── requirements.txt
 ├── README.md
 ├── .gitignore
@@ -48,8 +49,14 @@ autonomous-drone-pathfinding/
 │   │   ├── performance_metrics.png
 │   │   └── reroute_detection.png
 │   ├── graphs/
+│   │   ├── performance_summary.png
+│   │   ├── trajectory_heatmap.png
+│   │   └── benchmark_summary.png
 │   └── demo-video/
-└── results/
+├── results/
+│   ├── simulation_metrics.csv
+│   └── benchmark_results.csv
+└── report/
 ```
 
 ## Installation
@@ -103,6 +110,29 @@ The simulation measures:
 - Actual trajectory length
 - Path-efficiency percentage
 - Execution time
+
+## Multi-Trial Benchmark
+
+The simulation was evaluated across 10 successful trials using different
+reproducible random seeds. One additional seed was rejected because its
+generated environment contained no valid initial route.
+
+| Metric | Result |
+|---|---:|
+| Successful trials | 10 |
+| Failed seeds | 1 |
+| Average steps | 39.70 |
+| Average reroutes | 1.00 |
+| Average hazard pauses | 1.10 |
+| Average path efficiency | 96.14% |
+| Efficiency standard deviation | 4.39% |
+| Average algorithm execution time | 0.000790 seconds |
+
+The benchmark measures algorithm execution without animation delays.
+
+### Benchmark Visualization
+
+![Multi-trial benchmark results](evidence/graphs/benchmark_summary.png)
 
 ## Evidence
 

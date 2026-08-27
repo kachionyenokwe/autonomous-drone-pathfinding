@@ -5,4 +5,4 @@ hazard_pauses,1
 optimal_distance_steps,38
 actual_trajectory_steps,40
 path_efficiency_percent,95.0
-execution_time_seconds,13.5254
+execution_time_seconds,13.409
